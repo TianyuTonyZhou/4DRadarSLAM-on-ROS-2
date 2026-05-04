@@ -1,0 +1,30 @@
+/**:
+  ros__parameters:
+    # Topics
+    pointCloudTopic: "/off_highway_premium_radar_sample_driver/locations"
+    imuTopic: "/imu/data"
+    odomTopic: "/odom"
+    gpsTopic: "/gnss"
+
+    # Frames
+    lidarFrame: ""
+    baselinkFrame: "base_link"
+    odometryFrame: "odom"
+    mapFrame: "map"
+
+    # IMU Settings
+    imuAccNoise: 0.0022281160035059417
+    imuGyrNoise: 0.00011667951042710442
+    imuAccBiasN: 0.00011782392708033614
+    imuGyrBiasN: 2.616129872371749e-06
+    imuGravity: 9.80511
+    imuRPYWeight: 0.01
+
+    # Extrinsics
+    extrinsicTrans: [-0.3176955976234, -0.13761019052125, 0.05898352725152]
+    extrinsicRot: [0.999735807578, -0.0215215701795, -0.0081643477385,
+                   -0.02148120581797, -0.9997581134183, 0.00502853428037,
+                   -0.00826995351904, -0.0048509797951, -0.99995400578406]
+    extrinsicRPY: [0.999735807578, -0.0215215701795, -0.0081643477385,
+                   -0.02148120581797, -0.9997581134183, 0.00502853428037,
+                   -0.00826995351904, -0.0048509797951, -0.99995400578406]
