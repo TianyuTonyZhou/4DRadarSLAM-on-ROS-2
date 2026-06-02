@@ -68,8 +68,10 @@ target_include_directories(preprocessing_component PUBLIC
 target_link_libraries(preprocessing_component
   ${PCL_LIBRARIES} ${OpenCV_LIBS} OpenMP::OpenMP_CXX ${FAST_GICP_LIB})
 ament_target_dependencies(preprocessing_component ${AMENT_DEPS})
-rosidl_target_interfaces(preprocessing_component
+rosidl_get_typesupport_target(cpp_typesupport_target_pre
   ${PROJECT_NAME} "rosidl_typesupport_cpp")
+target_link_libraries(preprocessing_component
+  ${cpp_typesupport_target_pre})
 rclcpp_components_register_node(preprocessing_component
   PLUGIN "radar_graph_slam::PreprocessingComponent"
   EXECUTABLE preprocessing_node)
@@ -93,8 +95,10 @@ target_link_libraries(scan_matching_odometry_component
   g2o_solver_pcg g2o_solver_csparse g2o_solver_cholmod
 )
 ament_target_dependencies(scan_matching_odometry_component ${AMENT_DEPS})
-rosidl_target_interfaces(scan_matching_odometry_component
+rosidl_get_typesupport_target(cpp_typesupport_target_scan
   ${PROJECT_NAME} "rosidl_typesupport_cpp")
+target_link_libraries(scan_matching_odometry_component
+  ${cpp_typesupport_target_scan})
 rclcpp_components_register_node(scan_matching_odometry_component
   PLUGIN "radar_graph_slam::ScanMatchingOdometryComponent"
   EXECUTABLE scan_matching_odometry_node)
@@ -125,8 +129,10 @@ target_link_libraries(radar_graph_slam_component
   g2o_solver_pcg g2o_solver_csparse g2o_solver_cholmod
   gtsam OpenMP::OpenMP_CXX)
 ament_target_dependencies(radar_graph_slam_component ${AMENT_DEPS})
-rosidl_target_interfaces(radar_graph_slam_component
+rosidl_get_typesupport_target(cpp_typesupport_target_slam
   ${PROJECT_NAME} "rosidl_typesupport_cpp")
+target_link_libraries(radar_graph_slam_component
+  ${cpp_typesupport_target_slam})
 rclcpp_components_register_node(radar_graph_slam_component
   PLUGIN "radar_graph_slam::RadarGraphSlamComponent"
   EXECUTABLE radar_graph_slam_node)

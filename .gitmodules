@@ -1,0 +1,9 @@
+[submodule "barometer_bmp388"]
+	path = barometer_bmp388
+	url = git@github.com:TianyuTonyZhou/barometer_bmp388.git
+[submodule "fast_apdgicp"]
+	path = fast_apdgicp
+	url = git@github.com:TianyuTonyZhou/fast_apdgicp.git
+[submodule "ndt_omp"]
+	path = ndt_omp
+	url = git@github.com:TianyuTonyZhou/ndt_omp.git

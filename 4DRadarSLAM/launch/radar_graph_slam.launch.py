@@ -178,12 +178,20 @@ def generate_launch_description():
             output='screen',
         ),
 
-        # ── bag playback (replaces rosbag_play_radar_carpark1.launch) ─────────
-        ExecuteProcess(
-            cmd=[
-                'ros2', 'bag', 'play',
-                bag_path,
-                '--clock',
+        Node(
+            package='rqt_image_view',
+            executable='rqt_image_view',
+            name='camera_view',
+            arguments=['/zed2i/zed_node/left/image_rect_color/compressed'],
+            output='screen',
+        ),        
+
+        # ── bag playback ──────────────────────────────────────────────────────
+        #ExecuteProcess(
+        #    cmd=[
+        #        'ros2', 'bag', 'play',
+        #        bag_path,
+        #        '--clock',
                 #'--topics',
                 #'/off_highway_premium_radar_sample_driver/locations',
                 #'/imu/data',
@@ -192,7 +200,7 @@ def generate_launch_description():
                 #'/tf_static',
                 #'/zed2i/zed_node/left/image_rect_color/compressed',
                 #'/zed2i/zed_node/left/camera_info',
-            ],
-            output='screen',
-        ),
+        #    ],
+        #    output='screen',
+        #),
     ])
