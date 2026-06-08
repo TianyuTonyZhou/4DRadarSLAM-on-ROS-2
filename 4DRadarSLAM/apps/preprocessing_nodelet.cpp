@@ -53,7 +53,6 @@ public:
   : Node("preprocessing", options), ParamServer(this)
   {
     initializeTransformation();
-    initializeParams();
 
     points_sub = create_subscription<sensor_msgs::msg::PointCloud2>(
       pointCloudTopic, 64,
@@ -126,12 +125,17 @@ public:
     radius_radius = declare_parameter<double>("radius_radius", 0.8);
     radius_min_neighbors = declare_parameter<int>("radius_min_neighbors", 2);
     use_distance_filter = declare_parameter<bool>("use_distance_filter", true);
+    use_azimuth_filter = declare_parameter<bool>("use_azimuth_filter", false);
+    scan_azimuth_min_deg = declare_parameter<double>("scan_azimuth_min_deg", -180.0);
+    scan_azimuth_max_deg = declare_parameter<double>("scan_azimuth_max_deg", 180.0);
     distance_near_thresh = declare_parameter<double>("distance_near_thresh", 1.0);
     distance_far_thresh = declare_parameter<double>("distance_far_thresh", 100.0);
     z_low_thresh = declare_parameter<double>("z_low_thresh", -5.0);
     z_high_thresh = declare_parameter<double>("z_high_thresh", 20.0);
     gt_file_location = declare_parameter<std::string>("gt_file_location", "");
     publish_tf = declare_parameter<bool>("publish_tf", false);
+
+    initializeParams();
 
   }
   
@@ -486,7 +490,11 @@ private:
     std::copy_if(cloud->begin(), cloud->end(), std::back_inserter(filtered->points), [&](const PointT& p) {
       double d = p.getVector3fMap().norm();
       double z = p.z;
-      return d > distance_near_thresh && d < distance_far_thresh && z < z_high_thresh && z > z_low_thresh;
+      double azimuth_deg = std::atan2(static_cast<double>(p.y), static_cast<double>(p.x)) * 180.0 / M_PI;
+      bool in_distance = d > distance_near_thresh && d < distance_far_thresh;
+      bool in_height = z < z_high_thresh && z > z_low_thresh;
+      bool in_azimuth = !use_azimuth_filter || (azimuth_deg > scan_azimuth_min_deg && azimuth_deg < scan_azimuth_max_deg);
+      return in_distance && in_height && in_azimuth;
     });
     // for (size_t i=0; i<cloud->size(); i++){
     //   const PointT p = cloud->points.at(i);
@@ -634,8 +642,11 @@ private:
   std::shared_ptr<tf2_ros::TransformListener> tf_listener;
 
   bool use_distance_filter;
+  bool use_azimuth_filter;
   double distance_near_thresh;
   double distance_far_thresh;
+  double scan_azimuth_min_deg;
+  double scan_azimuth_max_deg;
   double z_low_thresh;
   double z_high_thresh;
   double scan_period;

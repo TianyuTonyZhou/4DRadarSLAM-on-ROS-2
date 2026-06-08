@@ -8,13 +8,18 @@
 #include <pcl/registration/icp.h>
 #include <pcl/registration/gicp.h>
 
+#ifdef RADAR_GRAPH_SLAM_HAVE_NDT_OMP
 #include <pclomp/ndt_omp.h>
 #include <pclomp/gicp_omp.h>
+#endif
+
+#ifdef RADAR_GRAPH_SLAM_HAVE_FAST_GICP
 #include <fast_gicp/gicp/fast_gicp.hpp>
 #include <fast_gicp/gicp/fast_vgicp.hpp>
 #include <fast_gicp/gicp/fast_apdgicp.hpp>
+#endif
 
-#ifdef USE_VGICP_CUDA
+#if defined(RADAR_GRAPH_SLAM_HAVE_FAST_GICP) && defined(USE_VGICP_CUDA)
 #include <fast_gicp/gicp/fast_vgicp_cuda.hpp>
 #endif
 
@@ -25,6 +30,7 @@ pcl::Registration<pcl::PointXYZI, pcl::PointXYZI>::Ptr select_registration_metho
 
   // select a registration method (ICP, GICP, NDT)
   std::string registration_method = (node->has_parameter("registration_method") ? node->get_parameter("registration_method").get_value<std::string>() : node->declare_parameter<std::string>("registration_method", "NDT_OMP"));
+#ifdef RADAR_GRAPH_SLAM_HAVE_FAST_GICP
   if(registration_method == "FAST_GICP") {
     std::cout << "registration: FAST_GICP" << std::endl;
     fast_gicp::FastGICP<PointT, PointT>::Ptr gicp(new fast_gicp::FastGICP<PointT, PointT>());
@@ -48,12 +54,13 @@ pcl::Registration<pcl::PointXYZI, pcl::PointXYZI>::Ptr select_registration_metho
     apdgicp->setElevationVar((node->has_parameter("elevation_var") ? node->get_parameter("elevation_var").get_value<double>() : node->declare_parameter<double>("elevation_var", 1.0)));
     return apdgicp;
   }
+#endif
 
   if (!node->has_parameter("reg_resolution")) {
     (node->has_parameter("reg_resolution") ? node->get_parameter("reg_resolution").get_value<double>() : node->declare_parameter<double>("reg_resolution", 1.0));
 }
 
-#ifdef USE_VGICP_CUDA
+#if defined(RADAR_GRAPH_SLAM_HAVE_FAST_GICP) && defined(USE_VGICP_CUDA)
   else if(registration_method == "FAST_VGICP_CUDA") {
     std::cout << "registration: FAST_VGICP_CUDA" << std::endl;
     fast_gicp::FastVGICPCuda<PointT, PointT>::Ptr vgicp(new fast_gicp::FastVGICPCuda<PointT, PointT>());
@@ -64,6 +71,7 @@ pcl::Registration<pcl::PointXYZI, pcl::PointXYZI>::Ptr select_registration_metho
     return vgicp;
   }
 #endif
+#ifdef RADAR_GRAPH_SLAM_HAVE_FAST_GICP
   else if(registration_method == "FAST_VGICP") {
     std::cout << "registration: FAST_VGICP" << std::endl;
     fast_gicp::FastVGICP<PointT, PointT>::Ptr vgicp(new fast_gicp::FastVGICP<PointT, PointT>());
@@ -73,7 +81,9 @@ pcl::Registration<pcl::PointXYZI, pcl::PointXYZI>::Ptr select_registration_metho
     vgicp->setMaximumIterations((node->has_parameter("reg_maximum_iterations") ? node->get_parameter("reg_maximum_iterations").get_value<int>() : node->declare_parameter<int>("reg_maximum_iterations", 64)));
     vgicp->setCorrespondenceRandomness((node->has_parameter("reg_correspondence_randomness") ? node->get_parameter("reg_correspondence_randomness").get_value<int>() : node->declare_parameter<int>("reg_correspondence_randomness", 20)));
     return vgicp;
-  } else if(registration_method == "ICP") {
+  }
+#endif
+  if(registration_method == "ICP") {
     std::cout << "registration: ICP" << std::endl;
     pcl::IterativeClosestPoint<PointT, PointT>::Ptr icp(new pcl::IterativeClosestPoint<PointT, PointT>());
     icp->setTransformationEpsilon((node->has_parameter("reg_transformation_epsilon") ? node->get_parameter("reg_transformation_epsilon").get_value<double>() : node->declare_parameter<double>("reg_transformation_epsilon", 0.01)));
@@ -92,6 +102,7 @@ pcl::Registration<pcl::PointXYZI, pcl::PointXYZI>::Ptr select_registration_metho
       gicp->setCorrespondenceRandomness((node->has_parameter("reg_correspondence_randomness") ? node->get_parameter("reg_correspondence_randomness").get_value<int>() : node->declare_parameter<int>("reg_correspondence_randomness", 20)));
       gicp->setMaximumOptimizerIterations((node->has_parameter("reg_max_optimizer_iterations") ? node->get_parameter("reg_max_optimizer_iterations").get_value<int>() : node->declare_parameter<int>("reg_max_optimizer_iterations", 20)));
       return gicp;
+#ifdef RADAR_GRAPH_SLAM_HAVE_NDT_OMP
     } else {
       std::cout << "registration: GICP_OMP" << std::endl;
       pclomp::GeneralizedIterativeClosestPoint<PointT, PointT>::Ptr gicp(new pclomp::GeneralizedIterativeClosestPoint<PointT, PointT>());
@@ -102,6 +113,7 @@ pcl::Registration<pcl::PointXYZI, pcl::PointXYZI>::Ptr select_registration_metho
       gicp->setCorrespondenceRandomness((node->has_parameter("reg_correspondence_randomness") ? node->get_parameter("reg_correspondence_randomness").get_value<int>() : node->declare_parameter<int>("reg_correspondence_randomness", 20)));
       gicp->setMaximumOptimizerIterations((node->has_parameter("reg_max_optimizer_iterations") ? node->get_parameter("reg_max_optimizer_iterations").get_value<int>() : node->declare_parameter<int>("reg_max_optimizer_iterations", 20)));
       return gicp;
+#endif
     }
   } else {
     if(registration_method.find("NDT") == std::string::npos) {
@@ -117,6 +129,7 @@ pcl::Registration<pcl::PointXYZI, pcl::PointXYZI>::Ptr select_registration_metho
       ndt->setMaximumIterations((node->has_parameter("reg_maximum_iterations") ? node->get_parameter("reg_maximum_iterations").get_value<int>() : node->declare_parameter<int>("reg_maximum_iterations", 64)));
       ndt->setResolution(ndt_resolution);
       return ndt;
+#ifdef RADAR_GRAPH_SLAM_HAVE_NDT_OMP
     } else {
       int num_threads = (node->has_parameter("reg_num_threads") ? node->get_parameter("reg_num_threads").get_value<int>() : node->declare_parameter<int>("reg_num_threads", 0));
       std::string nn_search_method = (node->has_parameter("reg_nn_search_method") ? node->get_parameter("reg_nn_search_method").get_value<std::string>() : node->declare_parameter<std::string>("reg_nn_search_method", "DIRECT7"));
@@ -136,6 +149,7 @@ pcl::Registration<pcl::PointXYZI, pcl::PointXYZI>::Ptr select_registration_metho
         ndt->setNeighborhoodSearchMethod(pclomp::DIRECT7);
       }
       return ndt;
+#endif
     }
   }
 

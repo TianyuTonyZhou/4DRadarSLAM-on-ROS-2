@@ -10,14 +10,9 @@
 
 namespace radar_graph_slam {
 
-KeyFrame::KeyFrame(const size_t index, const rclcpp::Time& stamp, const Eigen::Isometry3d& odom_scan2scan, double accum_distance, const pcl::PointCloud<PointT>::ConstPtr& cloud) : 
-  index(index), stamp(stamp), odom_scan2scan(odom_scan2scan), accum_distance(accum_distance), cloud(cloud), node(nullptr) {}
-
 KeyFrame::KeyFrame(const std::string& directory, g2o::HyperGraph* graph) : stamp(0, 0, RCL_ROS_TIME), odom_scan2scan(Eigen::Isometry3d::Identity()), accum_distance(-1), cloud(nullptr), node(nullptr) {
   load(directory, graph);
 }
-
-KeyFrame::~KeyFrame() {}
 
 void KeyFrame::save(const std::string& directory) {
   if(!boost::filesystem::is_directory(directory)) {
@@ -159,10 +154,6 @@ Eigen::Isometry3d KeyFrame::estimate() const {
   return node->estimate();
 }
 
-KeyFrameSnapshot::KeyFrameSnapshot(const Eigen::Isometry3d& pose, const pcl::PointCloud<PointT>::ConstPtr& cloud) : pose(pose), cloud(cloud) {}
-
 KeyFrameSnapshot::KeyFrameSnapshot(const KeyFrame::Ptr& key) : pose(key->node->estimate()), cloud(key->cloud) {}
-
-KeyFrameSnapshot::~KeyFrameSnapshot() {}
 
 }  // namespace radar_graph_slam

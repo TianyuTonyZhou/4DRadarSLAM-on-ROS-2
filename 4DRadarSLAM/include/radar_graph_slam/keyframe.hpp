@@ -11,8 +11,6 @@
 #include <geometry_msgs/msg/transform.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 
-#include <g2o/edge_se3_priorz.hpp>
-
 namespace g2o {
 class VertexSE3;
 class HyperGraph;
@@ -30,9 +28,16 @@ public:
   using PointT = pcl::PointXYZI;
   using Ptr = std::shared_ptr<KeyFrame>;
 
-  KeyFrame(const size_t index, const rclcpp::Time& stamp, const Eigen::Isometry3d& odom_scan2scan, double accum_distance, const pcl::PointCloud<PointT>::ConstPtr& cloud);
+  KeyFrame(const size_t index, const rclcpp::Time& stamp, const Eigen::Isometry3d& odom_scan2scan, double accum_distance, const pcl::PointCloud<PointT>::ConstPtr& cloud)
+    : index(index),
+      stamp(stamp),
+      odom_scan2scan(odom_scan2scan),
+      odom_scan2map(Eigen::Isometry3d::Identity()),
+      accum_distance(accum_distance),
+      cloud(cloud),
+      node(nullptr) {}
   KeyFrame(const std::string& directory, g2o::HyperGraph* graph);
-  virtual ~KeyFrame();
+  virtual ~KeyFrame() = default;
 
   void save(const std::string& directory);
   bool load(const std::string& directory, g2o::HyperGraph* graph);
@@ -49,7 +54,7 @@ public:
   pcl::PointCloud<PointT>::ConstPtr cloud;        // point cloud
   boost::optional<Eigen::Vector4d> floor_coeffs;  // detected floor's coefficients
   boost::optional<Eigen::Vector3d> utm_coord;     // UTM coord obtained by GPS
-  boost::optional<Eigen::Vector1d> altitude;      // Altitude (Filtered) obtained by Barometer
+  boost::optional<Eigen::Matrix<double, 1, 1>> altitude;  // Altitude (Filtered) obtained by Barometer
 
   boost::optional<Eigen::Vector3d> acceleration;    //
   boost::optional<Eigen::Quaterniond> orientation;  //
@@ -72,9 +77,10 @@ public:
   using Ptr = std::shared_ptr<KeyFrameSnapshot>;
 
   KeyFrameSnapshot(const KeyFrame::Ptr& key);
-  KeyFrameSnapshot(const Eigen::Isometry3d& pose, const pcl::PointCloud<PointT>::ConstPtr& cloud);
+  KeyFrameSnapshot(const Eigen::Isometry3d& pose, const pcl::PointCloud<PointT>::ConstPtr& cloud)
+    : pose(pose), cloud(cloud) {}
 
-  ~KeyFrameSnapshot();
+  ~KeyFrameSnapshot() = default;
 
 public:
   Eigen::Isometry3d pose;                   // pose estimated by graph optimization
