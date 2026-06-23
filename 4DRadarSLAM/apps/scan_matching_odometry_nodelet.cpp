@@ -51,7 +51,6 @@
 #include <radar_graph_slam/msg/scan_matching_status.hpp>
 #include <radar_graph_slam/keyframe.hpp>
 #include <radar_graph_slam/keyframe_updater.hpp>
-#include <radar_graph_slam/graph_slam.hpp>
 #include <radar_graph_slam/information_matrix_calculator.hpp>
 
 #include "utility_radar.h"
@@ -74,7 +73,6 @@ public:
   : Node("scan_matching_odometry", options), ParamServer(this)
   {
     RCLCPP_DEBUG(get_logger(), "initializing scan_matching_odometry...");
-    initialize_params(); // this
 
     if(declare_parameter<bool>("enable_imu_frontend", false)) {
       msf_pose_sub = create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
@@ -104,12 +102,7 @@ public:
       *ego_vel_sub,
       *points_sub
     );
-    sync->registerCallback(boost::bind(
-      &ScanMatchingOdometryComponent::pointcloud_callback, 
-      this, 
-      std::placeholders::_1, 
-      std::placeholders::_2)
-    );
+    sync->registerCallback(&ScanMatchingOdometryComponent::pointcloud_callback, this);
     imu_sub = create_subscription<sensor_msgs::msg::Imu>(
       "/imu",
       1024,
@@ -175,6 +168,7 @@ public:
     max_diff_trans = declare_parameter<double>("max_diff_trans", 1.0);
     max_diff_angle = declare_parameter<double>("max_diff_angle", 1.0);
     max_egovel_cum = declare_parameter<double>("max_egovel_cum", 1.0);
+    enable_planar_motion = declare_parameter<bool>("enable_planar_motion", false);
 
     map_cloud_resolution = declare_parameter<double>("map_cloud_resolution", 0.05);
     enable_scan_to_map = declare_parameter<bool>("enable_scan_to_map", false);
@@ -184,7 +178,10 @@ public:
     imu_debug_out = declare_parameter<bool>("imu_debug_out", false);
     imu_fusion_ratio = declare_parameter<double>("imu_fusion_ratio", 0.1);
     downsample_method = declare_parameter<std::string>("downsample_method", "VOXELGRID");
-    downsample_resolution = declare_parameter<double>("downsample_resolution", 0.1);    
+    downsample_resolution = declare_parameter<double>("downsample_resolution", 0.1);
+    min_registration_points = declare_parameter<int>("min_registration_points", 25);
+
+    initialize_params();
 
     init_timer_ = create_wall_timer(
       std::chrono::milliseconds(0),
@@ -415,6 +412,16 @@ private:
 		}
   }
 
+  Eigen::Matrix4d planarize_transform(const Eigen::Matrix4d& transform) const {
+    Eigen::Matrix4d planar = Eigen::Matrix4d::Identity();
+    const Eigen::Vector3d ypr = R2ypr(transform.block<3, 3>(0, 0));
+    const Eigen::AngleAxisd yaw_only(ypr(0), Eigen::Vector3d::UnitZ());
+    planar.block<3, 3>(0, 0) = yaw_only.toRotationMatrix();
+    planar(0, 3) = transform(0, 3);
+    planar(1, 3) = transform(1, 3);
+    return planar;
+  }
+
   /**
    * @brief callback for point clouds
    * @param cloud_msg  point cloud msg
@@ -433,7 +440,13 @@ private:
     double egovel_cum_z = twistMsg->twist.twist.linear.z * dt;
     // If too large, set 0
     if (pow(egovel_cum_x,2)+pow(egovel_cum_y,2)+pow(egovel_cum_z,2) > pow(max_egovel_cum, 2));
-    else egovel_cum.block<3, 1>(0, 3) = Eigen::Vector3d(egovel_cum_x, egovel_cum_y, egovel_cum_z);
+    else {
+      if(enable_planar_motion) {
+        egovel_cum.block<3, 1>(0, 3) = Eigen::Vector3d(egovel_cum_x, egovel_cum_y, 0.0);
+      } else {
+        egovel_cum.block<3, 1>(0, 3) = Eigen::Vector3d(egovel_cum_x, egovel_cum_y, egovel_cum_z);
+      }
+    }
     
     last_cloud_time = this_cloud_time;
 
@@ -489,6 +502,17 @@ private:
    * @return the relative pose between the input cloud and the keyframe_ cloud
    */
   Eigen::Matrix4d matching(const rclcpp::Time& stamp, const pcl::PointCloud<PointT>::ConstPtr& cloud) {
+    if(!cloud || cloud->size() < static_cast<size_t>(min_registration_points)) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 2000,
+        "Skipping frame at %.3f because source cloud is too small (%zu points, min %d)",
+        stamp.seconds(), cloud ? cloud->size() : 0, min_registration_points);
+      if(enable_scan_to_map) {
+        return keyframe_pose_s2m * prev_trans_s2m;
+      }
+      return keyframe_pose_s2s * prev_trans_s2s;
+    }
+
     if(!keyframe_cloud_s2s) {
       prev_time = rclcpp::Time(0, 0, RCL_ROS_TIME);
       prev_trans_s2s.setIdentity();
@@ -504,6 +528,15 @@ private:
       }
       return Eigen::Matrix4d::Identity();
     }
+
+    if(!keyframe_cloud_s2s || keyframe_cloud_s2s->size() < static_cast<size_t>(min_registration_points)) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 2000,
+        "Skipping frame at %.3f because scan-to-scan target cloud is too small (%zu points, min %d)",
+        stamp.seconds(), keyframe_cloud_s2s ? keyframe_cloud_s2s->size() : 0, min_registration_points);
+      return keyframe_pose_s2s * prev_trans_s2s;
+    }
+
     // auto filtered = downsample(cloud);
     auto filtered = cloud;
     // Set Source Cloud
@@ -541,6 +574,9 @@ private:
       else return keyframe_pose_s2s * prev_trans_s2s;
     }
     Eigen::Matrix4d trans_s2s = registration_s2s->getFinalTransformation().cast<double>();
+    if(enable_planar_motion) {
+      trans_s2s = planarize_transform(trans_s2s);
+    }
     odom_s2s_now = keyframe_pose_s2s * trans_s2s;
 
     Eigen::Matrix4d trans_s2m;
@@ -552,6 +588,9 @@ private:
         return keyframe_pose_s2m * prev_trans_s2m;
       }
       trans_s2m = registration_s2m->getFinalTransformation().cast<double>();
+      if(enable_planar_motion) {
+        trans_s2m = planarize_transform(trans_s2m);
+      }
       odom_s2m_now = keyframe_pose_s2m * trans_s2m;
     }
 
@@ -569,8 +608,11 @@ private:
       double da_rd = rotation_vector.angle();
       Eigen::Matrix3d rot_rd = radar_delta.block<3, 3>(0, 0).cast<double>();
       bool too_large_trans = dx_rd > max_acceptable_trans || da_rd > max_acceptable_angle;
-      double da, dx, delta_rot_imu = 0;
-      Eigen::Matrix3d matrix_rot; Eigen::Vector3d delta_trans_egovel;
+      double da = 0.0;
+      double dx = 0.0;
+      double delta_rot_imu = 0.0;
+      Eigen::Matrix3d matrix_rot = Eigen::Matrix3d::Identity();
+      Eigen::Vector3d delta_trans_egovel = Eigen::Vector3d::Zero();
 
       if (enable_imu_thresholding) {
         // Use IMU orientation to determine whether the matching result is good or not
@@ -614,13 +656,13 @@ private:
       else {
         if (too_large_trans) {
           cout << "Too large transform!!  " << dx_rd << "[m] " << da_rd << "[degree] Ignore this frame (" << stamp.seconds() << ")" << endl;
-          prev_trans_s2s = trans_s2s;
           thresholded = true;
           if (enable_scan_to_map){
-            prev_trans_s2m = trans_s2m;
-            odom_s2m_now = keyframe_pose_s2m * prev_trans_s2m * radar_delta;
+            odom_s2m_now = keyframe_pose_s2m * prev_trans_s2m;
           }
-          else odom_s2s_now = keyframe_pose_s2s * prev_trans_s2s * radar_delta;
+          else {
+            odom_s2s_now = keyframe_pose_s2s * prev_trans_s2s;
+          }
         }
       }
       last_radar_delta = radar_delta;
@@ -670,8 +712,13 @@ private:
           *submap_cloud += *cloud_transformed;
         }
         submap_cloud_downsampled = downsample(submap_cloud);
-        keyframe_cloud_s2m = submap_cloud_downsampled;
-        registration_s2m->setInputTarget(keyframe_cloud_s2m);
+        if(submap_cloud_downsampled && submap_cloud_downsampled->size() >= static_cast<size_t>(min_registration_points)) {
+          keyframe_cloud_s2m = submap_cloud_downsampled;
+          registration_s2m->setInputTarget(keyframe_cloud_s2m);
+        } else {
+          keyframe_cloud_s2m = keyframe_cloud_s2s;
+          registration_s2m->setInputTarget(keyframe_cloud_s2m);
+        }
         sensor_msgs::msg::PointCloud2 submap_ros;
         pcl::toROSMsg(*submap_cloud_downsampled, submap_ros);
         submap_ros.header.frame_id = odometryFrame;
@@ -795,6 +842,7 @@ private:
 
   bool enable_imu_fusion;
   bool imu_debug_out;
+  int min_registration_points;
   Eigen::Matrix3d global_orient_matrix;  // The rotation matrix with initial IMU roll & pitch measurement (yaw = 0)
     double timeLaserOdometry = 0;
     int imuPointerFront;
@@ -846,6 +894,7 @@ private:
   double max_diff_trans;
   double max_diff_angle;
   double max_egovel_cum;
+  bool enable_planar_motion;
   Eigen::Matrix4d last_radar_delta = Eigen::Matrix4d::Identity();
 
   // odometry calculation

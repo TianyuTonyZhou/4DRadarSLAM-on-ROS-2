@@ -119,6 +119,12 @@ public:
     use_egovel_preinteg_trans = declare_parameter<bool>("use_egovel_preinteg_trans", false);
     preinteg_trans_stddev = declare_parameter<double>("preinteg_trans_stddev", 1.0);
     preinteg_orient_stddev = declare_parameter<double>("preinteg_orient_stddev", 2.0);
+    enable_planar_z_constraint = declare_parameter<bool>("enable_planar_z_constraint", false);
+    planar_z_constraint_stddev = declare_parameter<double>("planar_z_constraint_stddev", 0.05);
+    enable_gravity_constraint = declare_parameter<bool>("enable_gravity_constraint", false);
+    gravity_constraint_stddev = declare_parameter<double>("gravity_constraint_stddev", 0.05);
+    enable_imu_orientation = declare_parameter<bool>("enable_imu_orientation", false);
+    imu_orientation_stddev = declare_parameter<double>("imu_orientation_stddev", 0.1);
 
     enable_barometer = declare_parameter<bool>("enable_barometer", false);
     barometer_edge_type = declare_parameter<int>("barometer_edge_type", 2);
@@ -377,11 +383,19 @@ private:
 
   void imu_callback(sensor_msgs::msg::Imu::ConstSharedPtr imu_odom_msg) {
     // Transform to Radar's Frame
-    auto imu_quat = std::make_shared<geometry_msgs::msg::QuaternionStamped>();
-    imu_quat->quaternion = imu_odom_msg->orientation;
-    Eigen::Quaterniond imu_quat_from(imu_quat->quaternion.w, imu_quat->quaternion.x, imu_quat->quaternion.y, imu_quat->quaternion.z);
+    sensor_msgs::msg::Imu transformed_imu = *imu_odom_msg;
+    Eigen::Quaterniond imu_quat_from(
+      transformed_imu.orientation.w,
+      transformed_imu.orientation.x,
+      transformed_imu.orientation.y,
+      transformed_imu.orientation.z
+    );
     Eigen::Quaterniond imu_quat_deskew = imu_quat_from * extQRPY;
     imu_quat_deskew.normalize();
+    transformed_imu.orientation.w = imu_quat_deskew.w();
+    transformed_imu.orientation.x = imu_quat_deskew.x();
+    transformed_imu.orientation.y = imu_quat_deskew.y();
+    transformed_imu.orientation.z = imu_quat_deskew.z();
 
     static int cnt = 0;
     if(cnt == 0) {
@@ -588,7 +602,7 @@ private:
         else if (barometer_edge_type == 2 && i != 0 && keyframes.at(i-1)->altitude.is_initialized()){
           g2o::OptimizableGraph::Edge* edge;
           Eigen::Vector1d information_matrix = Eigen::Vector1d::Identity() / barometer_edge_stddev;
-          Eigen::Vector1d relative_z(keyframe->altitude.value() - keyframes.at(i-1)->altitude.value());
+          Eigen::Matrix<double, 1, 1> relative_z(keyframe->altitude.value() - keyframes.at(i-1)->altitude.value());
           edge = graph_slam->add_se3_z_edge(keyframe->node, keyframes.at(i-1)->node, relative_z, information_matrix);
           graph_slam->add_robust_kernel(edge, barometer_edge_robust_kernel, barometer_edge_robust_kernel_size);
         }
@@ -630,6 +644,14 @@ private:
       keyframe->node = graph_slam->add_se3_node(odom);
       keyframe_hash[keyframe->stamp] = keyframe;
 
+      if(enable_gravity_constraint) {
+        const Eigen::Vector3d world_up = Eigen::Vector3d::UnitZ();
+        Eigen::Vector3d base_up_ref = initial_pose.block<3, 3>(0, 0).inverse() * world_up;
+        Eigen::Matrix3d information_gravity = Eigen::Matrix3d::Identity() / gravity_constraint_stddev;
+        auto edge_gravity = graph_slam->add_se3_prior_vec_edge(keyframe->node, world_up, base_up_ref, information_gravity);
+        graph_slam->add_robust_kernel(edge_gravity, "NONE", 1.0);
+      }
+
       // fix the first node
       if(keyframes.empty() && new_keyframes.size() == 1) {
         if(fix_first_node) {
@@ -659,6 +681,49 @@ private:
       auto edge = graph_slam->add_se3_edge(keyframe->node, prev_keyframe->node, relative_pose, information);
       // cout << information << endl;
       graph_slam->add_robust_kernel(edge, odom_edge_robust_kernel, odom_edge_robust_size);
+
+      if(enable_imu_orientation && keyframe->imu && prev_keyframe->imu) {
+        const auto& imu_curr = *keyframe->imu;
+        const auto& imu_prev = *prev_keyframe->imu;
+        Eigen::Quaterniond q_curr(
+          imu_curr.orientation.w,
+          imu_curr.orientation.x,
+          imu_curr.orientation.y,
+          imu_curr.orientation.z
+        );
+        Eigen::Quaterniond q_prev(
+          imu_prev.orientation.w,
+          imu_prev.orientation.x,
+          imu_prev.orientation.y,
+          imu_prev.orientation.z
+        );
+        q_curr.normalize();
+        q_prev.normalize();
+
+        Eigen::Isometry3d relative_imu = Eigen::Isometry3d::Identity();
+        relative_imu.linear() = (q_curr.inverse() * q_prev).toRotationMatrix();
+
+        Eigen::MatrixXd information_imu = Eigen::MatrixXd::Zero(6, 6);
+        const double weak_trans_info = 1e-6;
+        information_imu(0, 0) = weak_trans_info;
+        information_imu(1, 1) = weak_trans_info;
+        information_imu(2, 2) = weak_trans_info;
+        information_imu(3, 3) = 1.0 / imu_orientation_stddev;
+        information_imu(4, 4) = 1.0 / imu_orientation_stddev;
+        information_imu(5, 5) = 1.0 / imu_orientation_stddev;
+
+        auto edge_imu = graph_slam->add_se3_edge(keyframe->node, prev_keyframe->node, relative_imu, information_imu);
+        graph_slam->add_robust_kernel(edge_imu, "Huber", 1.0);
+      }
+
+      if(enable_planar_z_constraint) {
+        Eigen::Matrix<double, 1, 1> relative_z;
+        relative_z << 0.0;
+        Eigen::Matrix<double, 1, 1> information_z;
+        information_z << 1.0 / planar_z_constraint_stddev;
+        auto edge_z = graph_slam->add_se3_z_edge(keyframe->node, prev_keyframe->node, relative_z, information_z);
+        graph_slam->add_robust_kernel(edge_z, "NONE", 1.0);
+      }
 
       if (enable_preintegration){
         // Add Preintegration edge
@@ -1111,6 +1176,8 @@ private:
     ofs << "anchor_edge " << (anchor_edge == nullptr ? -1 : anchor_edge->id()) << std::endl;
     ofs << "floor_node " << (floor_plane_node == nullptr ? -1 : floor_plane_node->id()) << std::endl;
 
+    export_trajectory(directory);
+
     res->success = true;
   }
 
@@ -1275,25 +1342,12 @@ private:
   
   void command_callback(const std_msgs::msg::String& str_msg) {
     if (str_msg.data == "output_aftmapped") {
-      ofstream fout;
-      fout.open("/home/zhuge/stamped_pose_graph_estimate.txt", ios::out);
-      fout << "# timestamp tx ty tz qx qy qz qw" << endl;
-      fout.setf(ios::fixed, ios::floatfield);  // fixed mode，float
-      fout.precision(8);  // Set precision 8
-      for(size_t i = 0; i < keyframes.size(); i++) {
-        Eigen::Vector3d pos_ = keyframes[i]->node->estimate().translation();
-        Eigen::Matrix3d rot_ = keyframes[i]->node->estimate().rotation();
-        Eigen::Quaterniond quat_(rot_);
-        double timestamp = keyframes[i]->stamp.seconds();
-        double tx = pos_(0), ty = pos_(1), tz = pos_(2);
-        double qx = quat_.x(), qy = quat_.y(), qz = quat_.z(), qw = quat_.w();
-
-        fout << timestamp << " "
-          << tx << " " << ty << " " << tz << " "
-          << qx << " " << qy << " " << qz << " " << qw << endl;
+      const std::string directory = "/tmp/radar_graph_slam_export";
+      if(!boost::filesystem::is_directory(directory)) {
+        boost::filesystem::create_directories(directory);
       }
-      fout.close();
-      RCLCPP_INFO(get_logger(), "Optimized edges have been output!");
+      export_trajectory(directory);
+      RCLCPP_INFO_STREAM(get_logger(), "Optimized trajectory exported to " << directory);
     }
     else if (str_msg.data == "time") {
       if (loop_detector->pf_time.size() > 0) {
@@ -1316,6 +1370,35 @@ private:
         double median = opt_time.at(floor((double)opt_time.size() / 2));
         cout << "Optimization time cost (median): " << median << endl;
       }
+    }
+  }
+
+  void export_trajectory(const std::string& directory) const {
+    std::ofstream tum(directory + "/trajectory_tum.txt");
+    std::ofstream csv(directory + "/trajectory.csv");
+
+    tum << "# timestamp tx ty tz qx qy qz qw" << std::endl;
+    csv << "index,timestamp,tx,ty,tz,qx,qy,qz,qw" << std::endl;
+
+    tum.setf(std::ios::fixed, std::ios::floatfield);
+    csv.setf(std::ios::fixed, std::ios::floatfield);
+    tum.precision(9);
+    csv.precision(9);
+
+    for(size_t i = 0; i < keyframes.size(); i++) {
+      const Eigen::Isometry3d pose = keyframes[i]->node->estimate();
+      const Eigen::Vector3d pos = pose.translation();
+      const Eigen::Quaterniond quat(pose.rotation());
+      const double timestamp = keyframes[i]->stamp.seconds();
+
+      tum << timestamp << " "
+          << pos.x() << " " << pos.y() << " " << pos.z() << " "
+          << quat.x() << " " << quat.y() << " " << quat.z() << " " << quat.w() << std::endl;
+
+      csv << i << ","
+          << timestamp << ","
+          << pos.x() << "," << pos.y() << "," << pos.z() << ","
+          << quat.x() << "," << quat.y() << "," << quat.z() << "," << quat.w() << std::endl;
     }
   }
 
@@ -1371,7 +1454,12 @@ private:
   bool enable_preintegration;
   double preinteg_orient_stddev;
   double preinteg_trans_stddev;
+  bool enable_planar_z_constraint;
+  double planar_z_constraint_stddev;
+  bool enable_gravity_constraint;
+  double gravity_constraint_stddev;
   bool enable_imu_orientation;
+  double imu_orientation_stddev;
   bool use_egovel_preinteg_trans;
   Eigen::Matrix4d initial_pose;
 
