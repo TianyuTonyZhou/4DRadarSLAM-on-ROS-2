@@ -1,5 +1,5 @@
 from launch import LaunchDescription
-from launch.actions import ExecuteProcess, RegisterEventHandler, TimerAction
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, RegisterEventHandler, TimerAction
 from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessExit
 from launch.substitutions import LaunchConfiguration
@@ -15,20 +15,28 @@ def generate_launch_description():
     # ── arguments (mirrors the original <arg> tags) ──────────────────────────
     enable_barometer          = LaunchConfiguration('enable_barometer',          default='false')
     enable_gps                = LaunchConfiguration('enable_gps',                default='true')
-    enable_dynamic_object_removal = LaunchConfiguration('enable_dynamic_object_removal', default='false')
+    enable_dynamic_object_removal = LaunchConfiguration('enable_dynamic_object_removal', default='true')
     # enable_frontend_ego_vel   = LaunchConfiguration('enable_frontend_ego_vel',   default='true') # was false
     enable_preintegration     = LaunchConfiguration('enable_preintegration', default='false')
-    enable_transform_thresholding = LaunchConfiguration('enable_transform_thresholding', default='false')
+    enable_transform_thresholding = LaunchConfiguration('enable_transform_thresholding', default='true')
+    enable_scan_to_map        = LaunchConfiguration('enable_scan_to_map', default='true')
+    enable_imu_fusion         = LaunchConfiguration('enable_imu_fusion', default='false')
+    imu_fusion_ratio          = LaunchConfiguration('imu_fusion_ratio', default='0.10')
     enable_loop_closure       = LaunchConfiguration('enable_loop_closure',       default='false')
+    enable_gravity_constraint = LaunchConfiguration('enable_gravity_constraint', default='false')
+    enable_imu_orientation    = LaunchConfiguration('enable_imu_orientation',    default='false')
     auto_export_on_bag_exit   = LaunchConfiguration('auto_export_on_bag_exit',   default='true')
     keyframe_delta_trans_front_end = LaunchConfiguration('keyframe_delta_trans_front_end', default='0.25')
     keyframe_delta_trans_back_end  = LaunchConfiguration('keyframe_delta_trans_back_end',  default='2.0')
     keyframe_delta_angle      = LaunchConfiguration('keyframe_delta_angle',      default='0.2612')
-    registration_method       = LaunchConfiguration('registration_method',       default='GICP')
+    max_acceptable_trans      = LaunchConfiguration('max_acceptable_trans',      default='3.0')
+    max_egovel_cum            = LaunchConfiguration('max_egovel_cum',            default='3.0')
+    registration_method       = LaunchConfiguration('registration_method',       default='FAST_APDGICP')
     reg_resolution            = LaunchConfiguration('reg_resolution',            default='1.0')
     dist_var                  = LaunchConfiguration('dist_var',                  default='0.86')
     azimuth_var               = LaunchConfiguration('azimuth_var',               default='0.5')
     elevation_var             = LaunchConfiguration('elevation_var',             default='1.0')
+    use_rviz                  = LaunchConfiguration('use_rviz',                  default='true')
     bag_path                  = LaunchConfiguration('bag_path',
         default='/home/tianyu-tony-zhou/dataset/rosbag_2025_07_17-15-11-39_lidar_imu_bosch_comp-zed')
 
@@ -37,14 +45,11 @@ def generate_launch_description():
             'ros2', 'bag', 'play',
             bag_path,
             '--clock',
-            #'--topics',
-            #'/off_highway_premium_radar_sample_driver/locations',
-            #'/imu/data',
-            #'/gnss',
-            #'/tf',
-            #'/tf_static',
-            #'/zed2i/zed_node/left/image_rect_color/compressed',
-            #'/zed2i/zed_node/left/camera_info',
+            '--topics',
+            '/off_highway_premium_radar_sample_driver/locations',
+            '/imu/data',
+            '/tf',
+            '/tf_static',
         ],
         output='screen',
     )
@@ -73,6 +78,33 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        DeclareLaunchArgument('enable_barometer', default_value='false'),
+        DeclareLaunchArgument('enable_gps', default_value='true'),
+        DeclareLaunchArgument('enable_dynamic_object_removal', default_value='true'),
+        DeclareLaunchArgument('enable_preintegration', default_value='false'),
+        DeclareLaunchArgument('enable_transform_thresholding', default_value='true'),
+        DeclareLaunchArgument('enable_scan_to_map', default_value='true'),
+        DeclareLaunchArgument('enable_imu_fusion', default_value='false'),
+        DeclareLaunchArgument('imu_fusion_ratio', default_value='0.10'),
+        DeclareLaunchArgument('enable_loop_closure', default_value='false'),
+        DeclareLaunchArgument('enable_gravity_constraint', default_value='false'),
+        DeclareLaunchArgument('enable_imu_orientation', default_value='false'),
+        DeclareLaunchArgument('auto_export_on_bag_exit', default_value='true'),
+        DeclareLaunchArgument('keyframe_delta_trans_front_end', default_value='0.25'),
+        DeclareLaunchArgument('keyframe_delta_trans_back_end', default_value='2.0'),
+        DeclareLaunchArgument('keyframe_delta_angle', default_value='0.2612'),
+        DeclareLaunchArgument('max_acceptable_trans', default_value='3.0'),
+        DeclareLaunchArgument('max_egovel_cum', default_value='3.0'),
+        DeclareLaunchArgument('registration_method', default_value='FAST_APDGICP'),
+        DeclareLaunchArgument('reg_resolution', default_value='1.0'),
+        DeclareLaunchArgument('dist_var', default_value='0.86'),
+        DeclareLaunchArgument('azimuth_var', default_value='0.5'),
+        DeclareLaunchArgument('elevation_var', default_value='1.0'),
+        DeclareLaunchArgument('use_rviz', default_value='true'),
+        DeclareLaunchArgument(
+            'bag_path',
+            default_value='/home/tianyu-tony-zhou/dataset/rosbag_2025_07_17-15-11-39_lidar_imu_bosch_comp-zed',
+        ),
 
         # ── preprocessing ─────────────────────────────────────────────────────
         Node(
@@ -91,10 +123,10 @@ def generate_launch_description():
                 'z_low_thresh': -5.0,
                 'z_high_thresh': 100.0,
                 'downsample_method': 'VOXELGRID',
-                'downsample_resolution': 0.1,
-                'outlier_removal_method': 'NONE',
-                'statistical_mean_k': 30,
-                'statistical_stddev': 1.2,
+                'downsample_resolution': 0.2,
+                'outlier_removal_method': 'STATISTICAL',
+                'statistical_mean_k': 20,
+                'statistical_stddev': 1.0,
                 'radius_radius': 0.7,
                 'radius_min_neighbors': 2,
                 'power_threshold': 1.0,
@@ -113,13 +145,13 @@ def generate_launch_description():
                 'keyframe_delta_trans': keyframe_delta_trans_front_end,
                 'keyframe_delta_angle': keyframe_delta_angle,
                 'keyframe_min_size': 100,
-                'enable_transform_thresholding': True,
+                'enable_transform_thresholding': enable_transform_thresholding,
                 'enable_imu_thresholding': False,
-                'max_acceptable_trans': 1.5,
+                'max_acceptable_trans': max_acceptable_trans,
                 'max_acceptable_angle': 1.0,
                 'max_diff_trans': 1.0,
                 'max_diff_angle': 1.0,
-                'max_egovel_cum': 2.0,
+                'max_egovel_cum': max_egovel_cum,
                 'enable_planar_motion': True,
                 'downsample_method': 'NONE',
                 'downsample_resolution': 0.1,
@@ -139,10 +171,10 @@ def generate_launch_description():
                 'min_registration_points': 25,
                 'use_ego_vel': True,
                 'max_submap_frames': 5,
-                'enable_scan_to_map': False,
-                'enable_imu_fusion': False,
+                'enable_scan_to_map': enable_scan_to_map,
+                'enable_imu_fusion': enable_imu_fusion,
                 'imu_debug_out': False,
-                'imu_fusion_ratio': 0.05,
+                'imu_fusion_ratio': imu_fusion_ratio,
             }]
         ),
 
@@ -157,7 +189,7 @@ def generate_launch_description():
                 'g2o_solver_type': 'lm_var_cholmod',
                 'g2o_solver_num_iterations': 512,
                 'enable_barometer': enable_barometer,
-                'enable_gps': False,
+                'enable_gps': enable_gps,
                 'max_keyframes_per_update': 30,
                 'keyframe_delta_trans': keyframe_delta_trans_back_end,
                 'keyframe_delta_angle': keyframe_delta_angle,
@@ -165,7 +197,7 @@ def generate_launch_description():
                 'fix_first_node': True,
                 'fix_first_node_stddev': '10 10 10 1 1 1',
                 'fix_first_node_adaptive': True,
-                'enable_loop_closure': False,
+                'enable_loop_closure': enable_loop_closure,
                 'enable_pf': True,
                 'enable_odom_check': True,
                 'distance_thresh': 10.0,
@@ -205,9 +237,9 @@ def generate_launch_description():
                 'enable_preintegration': enable_preintegration,
                 'enable_planar_z_constraint': True,
                 'planar_z_constraint_stddev': 0.05,
-                'enable_gravity_constraint': True,
+                'enable_gravity_constraint': enable_gravity_constraint,
                 'gravity_constraint_stddev': 0.05,
-                'enable_imu_orientation': True,
+                'enable_imu_orientation': enable_imu_orientation,
                 'imu_orientation_stddev': 0.2,
                 'use_egovel_preinteg_trans': False,
                 'preinteg_orient_stddev': 1.0,
@@ -230,6 +262,7 @@ def generate_launch_description():
             name='rviz_slam',
             arguments=['-d', os.path.join(pkg, 'rviz', 'radar_graph_slam.rviz')],
             output='screen',
+            condition=IfCondition(use_rviz),
         ),
 
         # ── bag playback (replaces rosbag_play_radar_carpark1.launch) ─────────
